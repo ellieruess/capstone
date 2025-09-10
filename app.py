@@ -588,49 +588,39 @@ def build_cost_chart(df, filtered):
                 f"Note: Y-axis set to ~5th–95th percentile range ({y_domain[0]:.4f}–{y_domain[1]:.4f} $/kg·mi)."
             )
 
-def build_transit_chart(df, filtered):
-    st.markdown("### Transit Time (Days/mi)")
-    st.caption("This view isolates transit days from shipping distance to identify seasonal trends in delivery time.")
+def build_transit_days_chart(df, filtered):
+    st.markdown("### Transit Time (Days)")
+    st.caption("This view shows seasonal trends in total transit days (no distance normalization).")
     date_col_td = "Shipment_Date" if "Shipment_Date" in df.columns else None
     if date_col_td is None:
-        st.info("No shipment date column found to compute monthly transit days per mile.")
+        st.info("No shipment date column found to compute monthly transit days.")
         return
 
-    tdpm = filtered.copy()
+    td = filtered.copy()
     # align with original df index (same pattern)
     try:
-        tdpm[date_col_td] = df.loc[tdpm.index, date_col_td]
+        td[date_col_td] = df.loc[td.index, date_col_td]
     except Exception:
-        tdpm[date_col_td] = df[date_col_td].iloc[:len(tdpm)].values
+        td[date_col_td] = df[date_col_td].iloc[:len(td)].values
 
     # clean + required cols
-    tdpm[date_col_td] = pd.to_datetime(tdpm[date_col_td], errors="coerce")
-    tdpm["Transit_Days"] = pd.to_numeric(tdpm.get("Transit_Days"), errors="coerce")
-    tdpm["Distance_miles"] = pd.to_numeric(tdpm.get("Distance_miles"), errors="coerce")
+    td[date_col_td] = pd.to_datetime(td[date_col_td], errors="coerce")
+    td["Transit_Days"] = pd.to_numeric(td.get("Transit_Days"), errors="coerce")
 
-    tdpm = tdpm.dropna(subset=[date_col_td, "Transit_Days", "Distance_miles"])
-    tdpm = tdpm[tdpm["Distance_miles"] > 0]
-
-    if tdpm.empty:
-        st.info("No rows with valid transit days, distance, and dates after filtering.")
+    td = td.dropna(subset=[date_col_td, "Transit_Days"])
+    if td.empty:
+        st.info("No rows with valid transit days after filtering.")
         return
 
-    # metric: transit days per mile
-    tdpm["days_per_mile"] = tdpm["Transit_Days"] / tdpm["Distance_miles"]
-    tdpm = tdpm.replace([np.inf, -np.inf], np.nan).dropna(subset=["days_per_mile"])
-    if tdpm.empty:
-        st.info("No rows with finite days per mile after cleaning.")
-        return
-
-    # Month encoding with deterministic placement (no gaps)
-    tdpm["Month"] = tdpm[date_col_td].dt.month
-    days_in_month = tdpm[date_col_td].dt.days_in_month
-    day = tdpm[date_col_td].dt.day
-    tdpm["MonthPos"] = tdpm["Month"] + ((day - 0.5) / days_in_month) - 0.5
-    tdpm["MonthName"] = tdpm[date_col_td].dt.strftime("%b")
+    # Month encoding with deterministic placement
+    td["Month"] = td[date_col_td].dt.month
+    days_in_month = td[date_col_td].dt.days_in_month
+    day = td[date_col_td].dt.day
+    td["MonthPos"] = td["Month"] + ((day - 0.5) / days_in_month) - 0.5
+    td["MonthName"] = td[date_col_td].dt.strftime("%b")
 
     # Robust Y domain (5th–95th percentiles)
-    ql, qh = tdpm["days_per_mile"].quantile([0.05, 0.95]).tolist()
+    ql, qh = td["Transit_Days"].quantile([0.05, 0.95]).tolist()
     y_dom = [max(0.0, ql * 0.9), qh * 1.1] if np.isfinite(ql) and np.isfinite(qh) and ql < qh else None
 
     month_axis = alt.Axis(
@@ -641,30 +631,30 @@ def build_transit_chart(df, filtered):
     x_scale = alt.Scale(domain=[0.5, 12.5], nice=False, zero=False)
 
     y_enc = alt.Y(
-        "days_per_mile:Q",
+        "Transit_Days:Q",
         title=None,
-        axis=alt.Axis(format=".5f"),
+        axis=alt.Axis(format=".1f"),
         scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale()
     )
 
     scatter_bg = (
-        alt.Chart(tdpm)
+        alt.Chart(td)
         .mark_circle(size=18, opacity=0.18)
         .encode(
             x=alt.X("MonthPos:Q", axis=month_axis, title="Month", scale=x_scale),
             y=y_enc,
             tooltip=[
                 alt.Tooltip("MonthName:N", title="Month"),
-                alt.Tooltip("days_per_mile:Q", title="Days per mile", format=".5f"),
+                alt.Tooltip("Transit_Days:Q", title="Transit days", format=".1f"),
                 alt.Tooltip("Carrier:N", title="Carrier"),
             ]
         )
     )
 
     monthly = (
-        tdpm.groupby("Month", as_index=False)["days_per_mile"]
+        td.groupby("Month", as_index=False)["Transit_Days"]
         .median()
-        .rename(columns={"days_per_mile": "MedianDaysPerMile"})
+        .rename(columns={"Transit_Days": "MedianTransitDays"})
     )
 
     points = (
@@ -673,32 +663,33 @@ def build_transit_chart(df, filtered):
         .encode(
             x=alt.X("Month:Q", axis=month_axis, title="Month", scale=x_scale),
             y=alt.Y(
-                "MedianDaysPerMile:Q",
-                title="Median transit days per mile",
-                axis=alt.Axis(format=".5f"),
+                "MedianTransitDays:Q",
+                title="Median transit days",
+                axis=alt.Axis(format=".1f"),
                 scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale()
             ),
             tooltip=[
                 alt.Tooltip("Month:Q", title="Month", format=".0f"),
-                alt.Tooltip("MedianDaysPerMile:Q", title="Median days/mi", format=".5f"),
+                alt.Tooltip("MedianTransitDays:Q", title="Median days", format=".1f"),
             ]
         )
     )
 
     trend = (
         alt.Chart(monthly)
-        .transform_loess("Month", "MedianDaysPerMile", bandwidth=0.6)
+        .transform_loess("Month", "MedianTransitDays", bandwidth=0.6)
         .mark_line(size=3)
         .encode(
             x=alt.X("Month:Q", scale=x_scale),
-            y=alt.Y("MedianDaysPerMile:Q",
+            y=alt.Y("MedianTransitDays:Q",
                     scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale())
         )
     )
 
     st.altair_chart((scatter_bg + points + trend).properties(height=380), use_container_width=True)
     if y_dom:
-        st.caption(f"Note: Y-axis set to ~5th–95th percentile range ({y_dom[0]:.5f}–{y_dom[1]:.5f} days/mi).")
+        st.caption(f"Note: Y-axis set to ~5th–95th percentile range ({y_dom[0]:.1f}–{y_dom[1]:.1f} days).")
+
 
 
 # -------- Render side-by-side
