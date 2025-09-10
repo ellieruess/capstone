@@ -676,7 +676,7 @@ def build_transit_chart(df, filtered):
             x=alt.X("Month:Q", axis=month_axis, title="Month", scale=x_scale),
             y=alt.Y(
                 "MedianDaysPerMile:Q",
-                title="Median transit days per mile",
+                title="Transit days per mile",
                 axis=alt.Axis(format=".5f"),
                 scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale()
             ),
@@ -704,7 +704,7 @@ def build_transit_chart(df, filtered):
 
 
 # -------- Render selected view
-if view == "Median Cost per Kg-Mile (USD)":
+if view == "Cost per Kg-Mile (USD)":
     build_cost_chart(df, filtered)
 else:
     build_transit_chart(df, filtered)
