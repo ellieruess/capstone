@@ -318,7 +318,7 @@ else:
 # ----------------------
 # Header
 # ----------------------
-st.markdown("<h1 style='margin-bottom:0'>Logistics Analytics</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='margin-bottom:0'>Shipment Logistics Insights</h1>", unsafe_allow_html=True)
 st.caption(
     "This application is based on a synthetic US Logistics Dataset, which can be found [here](https://www.kaggle.com/datasets/shahriarkabir/us-logistics-performance-dataset)."
 )
