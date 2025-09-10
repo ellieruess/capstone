@@ -415,18 +415,15 @@ with kpi6:
     st.metric("Total Logistics Expenditure", fmt_currency(total_cost))
 
 # ======================
-# Seasonality Analysis (toggle between metrics)
+# Seasonality Analysis (two columns)
 # ======================
 st.markdown("## Seasonality Analysis")
 
-view = st.radio(
-    "Select metric",
-    options=["Cost per Kg-Mile (USD)", "Transit Days per Mile"],
-    horizontal=True,
-)
+col_left, col_right = st.columns(2)
 
 # -------- Helpers
 def build_cost_chart(df, filtered):
+    st.markdown("### Cost (USD)")
     st.caption("This view isolates cost from package weight & shipping distance to identify seasonal pricing changes.")
     date_col = next((c for c in ["Shipment_Date"] if c in df.columns), None)
     if date_col is None:
@@ -592,6 +589,7 @@ def build_cost_chart(df, filtered):
             )
 
 def build_transit_chart(df, filtered):
+    st.markdown("### Transit Time (Days/mi)")
     st.caption("This view isolates transit days from shipping distance to identify seasonal trends in delivery time.")
     date_col_td = "Shipment_Date" if "Shipment_Date" in df.columns else None
     if date_col_td is None:
@@ -676,7 +674,7 @@ def build_transit_chart(df, filtered):
             x=alt.X("Month:Q", axis=month_axis, title="Month", scale=x_scale),
             y=alt.Y(
                 "MedianDaysPerMile:Q",
-                title="Transit days per mile",
+                title="Median transit days per mile",
                 axis=alt.Axis(format=".5f"),
                 scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale()
             ),
@@ -703,12 +701,12 @@ def build_transit_chart(df, filtered):
         st.caption(f"Note: Y-axis set to ~5th–95th percentile range ({y_dom[0]:.5f}–{y_dom[1]:.5f} days/mi).")
 
 
-# -------- Render selected view
-if view == "Cost per Kg-Mile (USD)":
+# -------- Render side-by-side
+with col_left:
     build_cost_chart(df, filtered)
-else:
-    build_transit_chart(df, filtered)
 
+with col_right:
+    build_transit_chart(df, filtered)
 
 # ----------------------
 # Route Widget (below chart)
