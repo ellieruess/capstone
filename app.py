@@ -1008,7 +1008,6 @@ if dest_col_for_map:
     map_df["_lat"] = lats
     map_df["_lon"] = lons
     lat_col, lon_col = "_lat", "_lon"
-    st.caption(f"Mapped {hit} destination names to coordinates; {miss} not found.")
 else:
     st.caption("No Destination column found for mapping city names.")
     lat_col, lon_col = None, None
