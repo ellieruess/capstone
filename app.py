@@ -14,7 +14,7 @@ alt.data_transformers.disable_max_rows()
 # ----------------------
 # Page config
 # ----------------------
-st.set_page_config(page_title="Logistics Analytics", layout="wide")
+st.set_page_config(page_title="Logistics Insights", layout="wide")
 
 MAP_HEIGHT = 480  # px height for pydeck maps and their legends
 
@@ -1369,7 +1369,7 @@ def _estimate_transit_range(base_df: pd.DataFrame, carrier: str, origin_wh: str,
 
 # ---------------------- Sidebar UI ----------------------
 with st.sidebar:
-    st.markdown("### Predict Shipment Price")
+    st.markdown("### Shipment Cost Estimator")
     st.caption("This tool predicts shipment price and package arrival date.")
 
     _art = _pred_load_artifacts()
