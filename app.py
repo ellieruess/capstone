@@ -421,7 +421,7 @@ st.markdown("## Seasonality Analysis")
 
 view = st.radio(
     "Select metric",
-    options=["Median Cost per Kg-Mile (USD)", "Transit Days per Mile (Days/mi)"],
+    options=["Cost per Kg-Mile (USD)", "Transit Days per Mile"],
     horizontal=True,
 )
 
