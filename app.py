@@ -414,17 +414,25 @@ with kpi5:
 with kpi6:
     st.metric("Total Logistics Expenditure", fmt_currency(total_cost))
 
-# ----------------------
-# Median Cost per Kg-Mile (USD)
-# ----------------------
-st.markdown("### Median Cost per Kg-Mile (USD)")
-st.caption("This report isolates cost from package weight & shipping distance to identify seasonal pricing changes.")
-date_col_candidates = ["Shipment_Date"]
-date_col = next((c for c in date_col_candidates if c in df.columns), None)
+# ======================
+# Seasonality Analysis (toggle between metrics)
+# ======================
+st.markdown("## Seasonality Analysis")
 
-if date_col is None:
-    st.info("No shipment date column found to compute seasonality.")
-else:
+view = st.radio(
+    "Select metric",
+    options=["Median Cost per Kg-Mile (USD)", "Transit Days per Mile (Days/mi)"],
+    horizontal=True,
+)
+
+# -------- Helpers
+def build_cost_chart(df, filtered):
+    st.caption("This view isolates cost from package weight & shipping distance to identify seasonal pricing changes.")
+    date_col = next((c for c in ["Shipment_Date"] if c in df.columns), None)
+    if date_col is None:
+        st.info("No shipment date column found to compute seasonality.")
+        return
+
     temp = filtered.copy()
     # align with original df index (assumes same row order)
     try:
@@ -434,174 +442,164 @@ else:
 
     # ensure numeric fields
     temp["Cost"] = pd.to_numeric(temp["Cost"], errors="coerce")
-    temp["Weight_kg"] = pd.to_numeric(temp["Weight_kg"], errors="coerce") if "Weight_kg" in temp.columns else np.nan
-    temp["Distance_miles"] = pd.to_numeric(temp["Distance_miles"],
-                                           errors="coerce") if "Distance_miles" in temp.columns else np.nan
+    temp["Weight_kg"] = pd.to_numeric(temp.get("Weight_kg"), errors="coerce")
+    temp["Distance_miles"] = pd.to_numeric(temp.get("Distance_miles"), errors="coerce")
 
     temp[date_col] = pd.to_datetime(temp[date_col], errors="coerce")
     temp = temp.dropna(subset=[date_col, "Cost", "Weight_kg", "Distance_miles"])
-
-    # avoid division by zero or negative values
     temp = temp[(temp["Weight_kg"] > 0) & (temp["Distance_miles"] > 0)]
     if temp.empty:
         st.info("No rows with valid cost, weight, distance, and dates after filtering.")
+        return
+
+    # metric: cost per kg per mile
+    temp["cost_per_kg_mi"] = temp["Cost"] / (temp["Weight_kg"] * temp["Distance_miles"])
+    temp = temp.replace([np.inf, -np.inf], np.nan).dropna(subset=["cost_per_kg_mi"])
+    if temp.empty:
+        st.info("No rows with finite cost per kg·mile after filtering.")
+        return
+
+    # Decide granularity based on selected date span
+    dt_min = temp[date_col].min()
+    dt_max = temp[date_col].max()
+    span_days = (dt_max - dt_min).days if pd.notna(dt_min) and pd.notna(dt_max) else 9999
+    use_week = span_days < 92  # ~3 months
+
+    # Robust y-axis using percentiles
+    q_low, q_high = temp["cost_per_kg_mi"].quantile([0.05, 0.95]).tolist()
+    y_domain = None
+    if np.isfinite(q_low) and np.isfinite(q_high) and q_low < q_high:
+        pad_low = max(0.0, q_low * 0.9)
+        pad_high = q_high * 1.1
+        y_domain = [pad_low, pad_high]
+
+    rng = np.random.default_rng(42)
+
+    if use_week:
+        # ----- Week-to-Week -----
+        week_start = temp[date_col].dt.to_period('W-MON').apply(lambda p: p.start_time.normalize())
+        weeks_sorted = sorted(week_start.unique())
+        week_to_idx = {w: i + 1 for i, w in enumerate(weeks_sorted)}
+        temp = temp.assign(
+            WeekStart=week_start,
+            WeekIndex=[week_to_idx[w] for w in week_start],
+        )
+        temp = temp.assign(WeekJitter=temp["WeekIndex"] + rng.uniform(-0.2, 0.2, len(temp)))
+        week_labels = [w.strftime('%b %d') for w in weeks_sorted]
+        axis_values = list(range(1, len(week_labels) + 1))
+        labels_js = "[" + ",".join([f"'{lbl}'" for lbl in week_labels]) + "]"
+        axis = alt.Axis(title="Week (start date)", values=axis_values, labelExpr=f"{labels_js}[datum.value-1]")
+
+        y_enc = alt.Y(
+            "cost_per_kg_mi:Q",
+            title=None,
+            axis=alt.Axis(format="$,.4f"),
+            scale=alt.Scale(domain=y_domain, clamp=True) if y_domain else alt.Scale()
+        )
+
+        scatter_bg = (
+            alt.Chart(temp)
+            .mark_circle(size=18, opacity=0.18)
+            .encode(
+                x=alt.X("WeekJitter:Q", axis=axis, title="Week"),
+                y=y_enc,
+                tooltip=[
+                    alt.Tooltip("WeekStart:T", title="Week of"),
+                    alt.Tooltip("cost_per_kg_mi:Q", title="$ per kg·mi", format="$.4f"),
+                    alt.Tooltip("Carrier:N", title="Carrier")
+                ]
+            )
+        )
+
+        weekly = (
+            temp.groupby(["WeekIndex"], as_index=False)["cost_per_kg_mi"]
+            .median()
+            .rename(columns={"cost_per_kg_mi": "MedianCPKMi"})
+        )
+        weekly["WeekLabel"] = [week_labels[i - 1] for i in weekly["WeekIndex"]]
+
+        base = alt.Chart(weekly).encode(
+            x=alt.X("WeekIndex:Q", axis=axis),
+            y=alt.Y("MedianCPKMi:Q", title="Median $ per kg-mile",
+                    axis=alt.Axis(format="$,.4f"),
+                    scale=alt.Scale(domain=y_domain, clamp=True) if y_domain else alt.Scale()),
+            tooltip=[
+                alt.Tooltip("WeekLabel:N", title="Week"),
+                alt.Tooltip("MedianCPKMi:Q", title="Median $/kg·mi", format="$.4f"),
+            ]
+        )
+        points = base.mark_circle(size=90, opacity=0.9)
+        trend = base.transform_loess("WeekIndex", "MedianCPKMi", bandwidth=0.6).mark_line(size=3)
+
+        st.altair_chart((scatter_bg + points + trend).properties(height=380), use_container_width=True)
     else:
-        # metric: cost per kg per mile
-        temp["cost_per_kg_mi"] = temp["Cost"] / (temp["Weight_kg"] * temp["Distance_miles"])
-        temp = temp.replace([np.inf, -np.inf], np.nan).dropna(subset=["cost_per_kg_mi"])
+        # ----- Month-to-Month (no gaps; deterministic placement) -----
+        temp["Month"] = temp[date_col].dt.month
+        days_in_month = temp[date_col].dt.days_in_month
+        day = temp[date_col].dt.day
+        temp["MonthPos"] = temp["Month"] + ((day - 0.5) / days_in_month) - 0.5
 
-        if temp.empty:
-            st.info("No rows with finite cost per kg·mile after filtering.")
-        else:
-            # Decide granularity based on selected date span
-            dt_min = temp[date_col].min()
-            dt_max = temp[date_col].max()
-            span_days = (dt_max - dt_min).days if pd.notna(dt_min) and pd.notna(dt_max) else 9999
-            use_week = span_days < 92  # ~3 months
+        axis = alt.Axis(
+            title="Month",
+            values=list(range(1, 13)),
+            labelExpr="['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][datum.value-1]"
+        )
+        x_scale = alt.Scale(domain=[0.5, 12.5], nice=False, zero=False)
 
-            # Robust y-axis using percentiles
-            q_low, q_high = temp["cost_per_kg_mi"].quantile([0.05, 0.95]).tolist()
-            if not np.isfinite(q_low) or not np.isfinite(q_high) or q_low >= q_high:
-                y_domain = None
-            else:
-                pad_low = max(0.0, q_low * 0.9)
-                pad_high = q_high * 1.1
-                y_domain = [pad_low, pad_high]
+        y_enc = alt.Y(
+            "cost_per_kg_mi:Q",
+            title=None,
+            axis=alt.Axis(format="$,.4f"),
+            scale=alt.Scale(domain=y_domain, clamp=True) if y_domain else alt.Scale()
+        )
 
-            rng = np.random.default_rng(42)
+        scatter_bg = (
+            alt.Chart(temp)
+            .mark_circle(size=18, opacity=0.18)
+            .encode(
+                x=alt.X("MonthPos:Q", axis=axis, title="Month", scale=x_scale),
+                y=y_enc,
+                tooltip=[
+                    alt.Tooltip("Month:Q", title="Month", format=".0f"),
+                    alt.Tooltip("cost_per_kg_mi:Q", title="$ per kg·mi", format="$.4f"),
+                    alt.Tooltip("Carrier:N", title="Carrier")
+                ]
+            )
+        )
 
-            if use_week:
-                # ----- Week-to-Week -----
-                week_start = temp[date_col].dt.to_period('W-MON').apply(lambda p: p.start_time.normalize())
-                weeks_sorted = sorted(week_start.unique())
-                week_to_idx = {w: i + 1 for i, w in enumerate(weeks_sorted)}
-                temp = temp.assign(
-                    WeekStart=week_start,
-                    WeekIndex=[week_to_idx[w] for w in week_start],
-                )
-                temp = temp.assign(WeekJitter=temp["WeekIndex"] + rng.uniform(-0.2, 0.2, len(temp)))
-                week_labels = [w.strftime('%b %d') for w in weeks_sorted]
-                axis_values = list(range(1, len(week_labels) + 1))
-                labels_js = "[" + ",".join([f"'{lbl}'" for lbl in week_labels]) + "]"
-                axis = alt.Axis(title="Week (start date)", values=axis_values, labelExpr=f"{labels_js}[datum.value-1]")
+        monthly = (
+            temp.groupby("Month", as_index=False)["cost_per_kg_mi"]
+            .median()
+            .rename(columns={"cost_per_kg_mi": "MedianCPKMi"})
+        )
 
-                y_enc = alt.Y(
-                    "cost_per_kg_mi:Q",
-                    title=None,
-                    axis=alt.Axis(format="$,.4f"),
-                    scale=alt.Scale(domain=y_domain, clamp=True) if y_domain else alt.Scale()
-                )
+        base = alt.Chart(monthly).encode(
+            x=alt.X("Month:Q", axis=axis, scale=x_scale),
+            y=alt.Y(
+                "MedianCPKMi:Q",
+                title="Median $ per kg-mile",
+                axis=alt.Axis(format="$,.4f"),
+                scale=alt.Scale(domain=y_domain, clamp=True) if y_domain else alt.Scale()
+            )
+        )
+        points = base.mark_circle(size=90, opacity=0.9)
+        trend = base.transform_loess("Month", "MedianCPKMi", bandwidth=0.6).mark_line(size=3)
 
-                scatter_bg = (
-                    alt.Chart(temp)
-                    .mark_circle(size=18, opacity=0.18)
-                    .encode(
-                        x=alt.X("WeekJitter:Q", axis=axis, title="Week"),
-                        y=y_enc,
-                        tooltip=[
-                            alt.Tooltip("WeekStart:T", title="Week of"),
-                            alt.Tooltip("cost_per_kg_mi:Q", title="$ per kg·mi", format="$.4f"),
-                            alt.Tooltip("Carrier:N", title="Carrier")
-                        ]
-                    )
-                )
+        st.altair_chart((scatter_bg + points + trend).properties(height=380), use_container_width=True)
+        if y_domain:
+            st.caption(
+                f"Note: Y-axis set to ~5th–95th percentile range ({y_domain[0]:.4f}–{y_domain[1]:.4f} $/kg·mi)."
+            )
 
-                weekly = (
-                    temp.groupby(["WeekIndex"], as_index=False)["cost_per_kg_mi"]
-                    .median()
-                    .rename(columns={"cost_per_kg_mi": "MedianCPKMi"})
-                )
-                weekly["WeekLabel"] = [week_labels[i - 1] for i in weekly["WeekIndex"]]
+def build_transit_chart(df, filtered):
+    st.caption("This view isolates transit days from shipping distance to identify seasonal trends in delivery time.")
+    date_col_td = "Shipment_Date" if "Shipment_Date" in df.columns else None
+    if date_col_td is None:
+        st.info("No shipment date column found to compute monthly transit days per mile.")
+        return
 
-                base = alt.Chart(weekly).encode(
-                    x=alt.X("WeekIndex:Q", axis=axis),
-                    y=alt.Y("MedianCPKMi:Q", title="Median $ per kg-mile",
-                            axis=alt.Axis(format="$,.4f"),
-                            scale=alt.Scale(domain=y_domain, clamp=True) if y_domain else alt.Scale()),
-                    tooltip=[
-                        alt.Tooltip("WeekLabel:N", title="Week"),
-                        alt.Tooltip("MedianCPKMi:Q", title="Median $/kg·mi", format="$.4f"),
-                    ]
-                )
-                points = base.mark_circle(size=90, opacity=0.9)
-                trend = base.transform_loess("WeekIndex", "MedianCPKMi", bandwidth=0.6).mark_line(size=3)
-
-                st.altair_chart((scatter_bg + points + trend).properties(height=380), use_container_width=True)
-            else:
-                # ----- Month-to-Month (no gaps; deterministic placement) -----
-                # Position each point within its month using day-of-month (not random jitter)
-                temp["Month"] = temp[date_col].dt.month
-                days_in_month = temp[date_col].dt.days_in_month
-                day = temp[date_col].dt.day
-
-                # MonthPos spans [Month-0.5, Month+0.5) so there are no inter-month gaps
-                temp["MonthPos"] = temp["Month"] + ((day - 0.5) / days_in_month) - 0.5
-
-                axis = alt.Axis(
-                    title="Month",
-                    values=list(range(1, 13)),
-                    labelExpr="['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][datum.value-1]"
-                )
-
-                x_scale = alt.Scale(domain=[0.5, 12.5], nice=False, zero=False)
-
-                y_enc = alt.Y(
-                    "cost_per_kg_mi:Q",
-                    title=None,
-                    axis=alt.Axis(format="$,.4f"),
-                    scale=alt.Scale(domain=y_domain, clamp=True) if y_domain else alt.Scale()
-                )
-
-                scatter_bg = (
-                    alt.Chart(temp)
-                    .mark_circle(size=18, opacity=0.18)
-                    .encode(
-                        x=alt.X("MonthPos:Q", axis=axis, title="Month", scale=x_scale),
-                        y=y_enc,
-                        tooltip=[
-                            alt.Tooltip("Month:Q", title="Month", format=".0f"),
-                            alt.Tooltip("cost_per_kg_mi:Q", title="$ per kg·mi", format="$.4f"),
-                            alt.Tooltip("Carrier:N", title="Carrier")
-                        ]
-                    )
-                )
-
-                monthly = (
-                    temp.groupby("Month", as_index=False)["cost_per_kg_mi"]
-                    .median()
-                    .rename(columns={"cost_per_kg_mi": "MedianCPKMi"})
-                )
-
-                base = alt.Chart(monthly).encode(
-                    x=alt.X("Month:Q", axis=axis, scale=x_scale),
-                    y=alt.Y(
-                        "MedianCPKMi:Q",
-                        title="Median $ per kg-mile",
-                        axis=alt.Axis(format="$,.4f"),
-                        scale=alt.Scale(domain=y_domain, clamp=True) if y_domain else alt.Scale()
-                    )
-                )
-                points = base.mark_circle(size=90, opacity=0.9)
-                trend = base.transform_loess("Month", "MedianCPKMi", bandwidth=0.6).mark_line(size=3)
-
-                st.altair_chart((scatter_bg + points + trend).properties(height=380), use_container_width=True)
-                if y_domain:
-                    st.caption(
-                        f"Note: Y-axis set to ~5th–95th percentile range ({y_domain[0]:.4f}–{y_domain[1]:.4f} $/kg·mi)."
-                    )
-
-# ----------------------
-# Transit Days per Mile (Days/mi) — below the Cost per Kg-Mile chart
-# ----------------------
-st.markdown("### Transit Days per Mile (Days/mi)")
-st.caption("This report isolates transit days from shipping distance to identify seasonal trends in delivery time.")
-date_col_td = "Shipment_Date" if "Shipment_Date" in df.columns else None
-if date_col_td is None:
-    st.info("No shipment date column found to compute monthly transit days per mile.")
-else:
     tdpm = filtered.copy()
-
-    # align with original df index (same pattern used above)
+    # align with original df index (same pattern)
     try:
         tdpm[date_col_td] = df.loc[tdpm.index, date_col_td]
     except Exception:
@@ -609,7 +607,7 @@ else:
 
     # clean + required cols
     tdpm[date_col_td] = pd.to_datetime(tdpm[date_col_td], errors="coerce")
-    tdpm["Transit_Days"] = pd.to_numeric(tdpm["Transit_Days"], errors="coerce")
+    tdpm["Transit_Days"] = pd.to_numeric(tdpm.get("Transit_Days"), errors="coerce")
     tdpm["Distance_miles"] = pd.to_numeric(tdpm.get("Distance_miles"), errors="coerce")
 
     tdpm = tdpm.dropna(subset=[date_col_td, "Transit_Days", "Distance_miles"])
@@ -617,97 +615,100 @@ else:
 
     if tdpm.empty:
         st.info("No rows with valid transit days, distance, and dates after filtering.")
-    else:
-        # metric: transit days per mile
-        tdpm["days_per_mile"] = tdpm["Transit_Days"] / tdpm["Distance_miles"] * 100
-        tdpm = tdpm.replace([np.inf, -np.inf], np.nan).dropna(subset=["days_per_mile"])
+        return
 
-        if tdpm.empty:
-            st.info("No rows with finite days per mile after cleaning.")
-        else:
-            # --- Month encoding with deterministic placement (no gaps) ---
-            tdpm["Month"] = tdpm[date_col_td].dt.month
-            days_in_month = tdpm[date_col_td].dt.days_in_month
-            day = tdpm[date_col_td].dt.day
-            # MonthPos spans [Month-0.5, Month+0.5)
-            tdpm["MonthPos"] = tdpm["Month"] + ((day - 0.5) / days_in_month) - 0.5
+    # metric: transit days per mile (x100 to get friendly numbers)
+    tdpm["days_per_mile"] = tdpm["Transit_Days"] / tdpm["Distance_miles"] * 100
+    tdpm = tdpm.replace([np.inf, -np.inf], np.nan).dropna(subset=["days_per_mile"])
+    if tdpm.empty:
+        st.info("No rows with finite days per mile after cleaning.")
+        return
 
-            # Optional: friendly month names for tooltips
-            tdpm["MonthName"] = tdpm[date_col_td].dt.strftime("%b")
+    # Month encoding with deterministic placement (no gaps)
+    tdpm["Month"] = tdpm[date_col_td].dt.month
+    days_in_month = tdpm[date_col_td].dt.days_in_month
+    day = tdpm[date_col_td].dt.day
+    tdpm["MonthPos"] = tdpm["Month"] + ((day - 0.5) / days_in_month) - 0.5
+    tdpm["MonthName"] = tdpm[date_col_td].dt.strftime("%b")
 
-            # Robust Y domain (5th–95th percentiles) – keep your existing logic
-            ql, qh = tdpm["days_per_mile"].quantile([0.05, 0.95]).tolist()
-            y_dom = [max(0.0, ql * 0.9), qh * 1.1] if np.isfinite(ql) and np.isfinite(qh) and ql < qh else None
+    # Robust Y domain (5th–95th percentiles)
+    ql, qh = tdpm["days_per_mile"].quantile([0.05, 0.95]).tolist()
+    y_dom = [max(0.0, ql * 0.9), qh * 1.1] if np.isfinite(ql) and np.isfinite(qh) and ql < qh else None
 
-            month_axis = alt.Axis(
-                title="Month",
-                values=list(range(1, 13)),
-                labelExpr="['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][datum.value-1]"
-            )
-            # Fix the x domain so month bands are contiguous with no outer padding
-            x_scale = alt.Scale(domain=[0.5, 12.5], nice=False, zero=False)
+    month_axis = alt.Axis(
+        title="Month",
+        values=list(range(1, 13)),
+        labelExpr="['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][datum.value-1]"
+    )
+    x_scale = alt.Scale(domain=[0.5, 12.5], nice=False, zero=False)
 
-            y_enc = alt.Y(
-                "days_per_mile:Q",
-                title=None,
+    y_enc = alt.Y(
+        "days_per_mile:Q",
+        title=None,
+        axis=alt.Axis(format=".5f"),
+        scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale()
+    )
+
+    scatter_bg = (
+        alt.Chart(tdpm)
+        .mark_circle(size=18, opacity=0.18)
+        .encode(
+            x=alt.X("MonthPos:Q", axis=month_axis, title="Month", scale=x_scale),
+            y=y_enc,
+            tooltip=[
+                alt.Tooltip("MonthName:N", title="Month"),
+                alt.Tooltip("days_per_mile:Q", title="Days per mile", format=".5f"),
+                alt.Tooltip("Carrier:N", title="Carrier"),
+            ]
+        )
+    )
+
+    monthly = (
+        tdpm.groupby("Month", as_index=False)["days_per_mile"]
+        .median()
+        .rename(columns={"days_per_mile": "MedianDaysPerMile"})
+    )
+
+    points = (
+        alt.Chart(monthly)
+        .mark_circle(size=90, opacity=0.9)
+        .encode(
+            x=alt.X("Month:Q", axis=month_axis, title="Month", scale=x_scale),
+            y=alt.Y(
+                "MedianDaysPerMile:Q",
+                title="Median transit days per mile",
                 axis=alt.Axis(format=".5f"),
                 scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale()
-            )
+            ),
+            tooltip=[
+                alt.Tooltip("Month:Q", title="Month", format=".0f"),
+                alt.Tooltip("MedianDaysPerMile:Q", title="Median days/mi", format=".5f"),
+            ]
+        )
+    )
 
-            scatter_bg = (
-                alt.Chart(tdpm)
-                .mark_circle(size=18, opacity=0.18)
-                .encode(
-                    x=alt.X("MonthPos:Q", axis=month_axis, title="Month", scale=x_scale),
-                    y=y_enc,
-                    tooltip=[
-                        alt.Tooltip("MonthName:N", title="Month"),
-                        alt.Tooltip("days_per_mile:Q", title="Days per mile", format=".5f"),
-                        alt.Tooltip("Carrier:N", title="Carrier"),
-                    ]
-                )
-            )
+    trend = (
+        alt.Chart(monthly)
+        .transform_loess("Month", "MedianDaysPerMile", bandwidth=0.6)
+        .mark_line(size=3)
+        .encode(
+            x=alt.X("Month:Q", scale=x_scale),
+            y=alt.Y("MedianDaysPerMile:Q",
+                    scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale())
+        )
+    )
 
-            monthly = (
-                tdpm.groupby("Month", as_index=False)["days_per_mile"]
-                .median()
-                .rename(columns={"days_per_mile": "MedianDaysPerMile"})
-            )
+    st.altair_chart((scatter_bg + points + trend).properties(height=380), use_container_width=True)
+    if y_dom:
+        st.caption(f"Note: Y-axis set to ~5th–95th percentile range ({y_dom[0]:.5f}–{y_dom[1]:.5f} days/mi).")
 
-            points = (
-                alt.Chart(monthly)
-                .mark_circle(size=90, opacity=0.9)
-                .encode(
-                    x=alt.X("Month:Q", axis=month_axis, title="Month", scale=x_scale),
-                    y=alt.Y(
-                        "MedianDaysPerMile:Q",
-                        title="Median transit days per mile",
-                        axis=alt.Axis(format=".5f"),
-                        scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale()
-                    ),
-                    tooltip=[
-                        alt.Tooltip("Month:Q", title="Month", format=".0f"),
-                        alt.Tooltip("MedianDaysPerMile:Q", title="Median days/mi", format=".5f"),
-                    ]
-                )
-            )
 
-            trend = (
-                alt.Chart(monthly)
-                .transform_loess("Month", "MedianDaysPerMile", bandwidth=0.6)
-                .mark_line(size=3)
-                .encode(
-                    x=alt.X("Month:Q", scale=x_scale),  # share same contiguous month domain
-                    y=alt.Y("MedianDaysPerMile:Q",
-                            scale=alt.Scale(domain=y_dom, clamp=True) if y_dom else alt.Scale())
-                )
-            )
+# -------- Render selected view
+if view == "Median Cost per Kg-Mile (USD)":
+    build_cost_chart(df, filtered)
+else:
+    build_transit_chart(df, filtered)
 
-            st.altair_chart((scatter_bg + points + trend).properties(height=380), use_container_width=True)
-            if y_dom:
-                st.caption(
-                    f"Note: Y-axis set to ~5th–95th percentile range ({y_dom[0]:.5f}–{y_dom[1]:.5f} days/mi)."
-                )
 
 # ----------------------
 # Route Widget (below chart)
