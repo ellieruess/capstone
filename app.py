@@ -615,8 +615,8 @@ def build_transit_chart(df, filtered):
         st.info("No rows with valid transit days, distance, and dates after filtering.")
         return
 
-    # metric: transit days per mile (x100 to get friendly numbers)
-    tdpm["days_per_mile"] = tdpm["Transit_Days"] / tdpm["Distance_miles"] * 100
+    # metric: transit days per mile
+    tdpm["days_per_mile"] = tdpm["Transit_Days"] / tdpm["Distance_miles"]
     tdpm = tdpm.replace([np.inf, -np.inf], np.nan).dropna(subset=["days_per_mile"])
     if tdpm.empty:
         st.info("No rows with finite days per mile after cleaning.")
