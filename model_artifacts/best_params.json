@@ -1,0 +1,176 @@
+{
+  "cost_params": {
+    "learning_rate": 0.016030182697577208,
+    "num_leaves": 157,
+    "max_depth": 17,
+    "min_child_samples": 50,
+    "feature_fraction": 0.9994891134515507,
+    "bagging_fraction": 0.8147657261706673,
+    "bagging_freq": 6,
+    "lambda_l1": 8.135462362525248e-06,
+    "lambda_l2": 3.693544333296998e-05,
+    "objective": "regression",
+    "metric": "rmse",
+    "verbose": -1,
+    "random_state": 42
+  },
+  "days_params": {
+    "learning_rate": 0.10653347083414894,
+    "num_leaves": 97,
+    "max_depth": 18,
+    "min_child_samples": 50,
+    "feature_fraction": 0.9975898165325531,
+    "bagging_fraction": 0.7530317173264705,
+    "bagging_freq": 3,
+    "lambda_l1": 1.9048025538984172e-07,
+    "lambda_l2": 1.297035295058723e-08,
+    "objective": "poisson",
+    "metric": "rmse",
+    "verbose": -1,
+    "random_state": 42
+  },
+  "cost_features": {
+    "numerical": [
+      "Distance_miles",
+      "Weight_kg",
+      "month",
+      "day_of_week",
+      "day_of_month",
+      "is_weekend",
+      "is_holiday_season",
+      "is_dhl",
+      "is_usps",
+      "is_ups",
+      "is_fedex",
+      "dhl_distance",
+      "usps_distance",
+      "dhl_weight",
+      "usps_weight",
+      "is_problem_route",
+      "is_long_distance_dhl",
+      "dhl_long_distance",
+      "problem_route_distance",
+      "dhl_distance_tier",
+      "dhl_weight_tier",
+      "dhl_weekend",
+      "dhl_holiday",
+      "dhl_distance_tier_detailed",
+      "dhl_very_long_distance",
+      "dhl_distance_squared",
+      "dhl_weight_tier_detailed",
+      "dhl_heavy_package",
+      "dhl_very_heavy_package",
+      "dhl_weight_distance",
+      "carrier_route_count"
+    ],
+    "categorical": [
+      "Carrier",
+      "origin_warehouse",
+      "Destination"
+    ],
+    "route_hash_features": 256
+  },
+  "days_features": {
+    "numerical": [
+      "Distance_miles",
+      "Weight_kg",
+      "month",
+      "day_of_week",
+      "day_of_month",
+      "is_weekend",
+      "is_holiday_season",
+      "is_dhl",
+      "is_usps",
+      "is_ups",
+      "is_fedex",
+      "dhl_distance",
+      "usps_distance",
+      "dhl_weight",
+      "usps_weight",
+      "is_problem_route",
+      "is_long_distance_dhl",
+      "dhl_long_distance",
+      "problem_route_distance",
+      "dhl_distance_tier",
+      "dhl_weight_tier",
+      "dhl_weekend",
+      "dhl_holiday",
+      "dhl_distance_tier_detailed",
+      "dhl_very_long_distance",
+      "dhl_distance_squared",
+      "dhl_weight_tier_detailed",
+      "dhl_heavy_package",
+      "dhl_very_heavy_package",
+      "dhl_weight_distance",
+      "carrier_route_count",
+      "carrier_avg_days",
+      "route_avg_days",
+      "carrier_route_avg_days"
+    ],
+    "categorical": [
+      "Carrier",
+      "origin_warehouse",
+      "Destination"
+    ],
+    "route_hash_features": 256
+  },
+  "cv_scores": {
+    "cost_mean": 22.52745456452495,
+    "cost_std": 3.7490072278539253,
+    "days_mean": 1.0155481448749881,
+    "days_std": 0.05720062031081029
+  },
+  "calibration": {
+    "cost": {
+      "USPS": {
+        "multiplier": 0.9869874728329864
+      },
+      "OnTrac": {
+        "multiplier": 1.019556742841313
+      },
+      "Amazon Logistics": {
+        "multiplier": 0.9893082122119389
+      },
+      "LaserShip": {
+        "multiplier": 1.0157557564492832
+      },
+      "DHL": {
+        "multiplier": 1.007920337909863
+      },
+      "FedEx": {
+        "multiplier": 1.012347718953046
+      },
+      "UPS": {
+        "multiplier": 1.0062566629328669
+      }
+    },
+    "days": {
+      "USPS": {
+        "additive": 0.01276184893333987
+      },
+      "OnTrac": {
+        "additive": 0.3421174598459494
+      },
+      "Amazon Logistics": {
+        "additive": 0.02022962907268278
+      },
+      "LaserShip": {
+        "additive": 0.28635377724078
+      },
+      "DHL": {
+        "additive": -0.0058166902324147465
+      },
+      "FedEx": {
+        "additive": 0.11981294451607444
+      },
+      "UPS": {
+        "additive": -0.07398490385564538
+      }
+    }
+  },
+  "validation_rmse": {
+    "cost_calibrated": 23.204219188843673,
+    "cost_adaptive": 24.617711604799094,
+    "days_calibrated": 1.3466830485645644
+  }
+}
