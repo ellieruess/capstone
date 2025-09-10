@@ -1516,7 +1516,7 @@ with st.sidebar:
                 )
 
                 st.markdown("#### Results")
-                st.caption(f"Distance (computed): **{in_distance:,.2f} miles**  •  Route: **{in_origin} → {in_dest}**")
+                st.caption(f"Distance: **{in_distance:,.2f} miles**  •  Route: **{in_origin} → {in_dest}**")
 
                 # Chart (with extra tooltips)
                 try:
