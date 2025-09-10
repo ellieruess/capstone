@@ -588,7 +588,7 @@ def build_cost_chart(df, filtered):
                 f"Note: Y-axis set to ~5th–95th percentile range ({y_domain[0]:.4f}–{y_domain[1]:.4f} $/kg·mi)."
             )
 
-def build_transit_days_chart(df, filtered):
+def build_transit_chart(df, filtered):
     st.markdown("### Transit Time (Days)")
     st.caption("This view shows seasonal trends in total transit days (no distance normalization).")
     date_col_td = "Shipment_Date" if "Shipment_Date" in df.columns else None
